@@ -1,0 +1,25 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: postgres_db
+    restart: always
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "${DB_PORT}:5432"
+    volumes:
+      - ./out/pgdata:/var/lib/postgresql/data
+
+  migrate:
+    image: migrate/migrate:v4.19.1
+    volumes:
+      - ./migrations:/migrations
+    environment:
+      - DB_URL=postgres://${DB_USER}:${DB_PASSWORD}@${DB_DOCKER_HOST}:5432/${DB_NAME}?sslmode=disable
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${DB_USER}:${DB_PASSWORD}@${DB_DOCKER_HOST}:5432/${DB_NAME}?sslmode=disable"]
+    depends_on:
+      - db
