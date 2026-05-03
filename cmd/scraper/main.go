@@ -1,13 +1,10 @@
 package main
 
 import (
-	"context"
 	"log"
 
 	"wb_scraper/internal/config"
-	"wb_scraper/internal/repository"
 	"wb_scraper/internal/scraper"
-	"wb_scraper/internal/service"
 )
 
 func main() {
@@ -18,13 +15,13 @@ func main() {
 
 	// todo Connect to db
 
-	db, err := repository.InitDB(cfg)
-	if err != nil {
-		log.Fatal(err)
-	}
+	// db, err := repository.InitDB(cfg)
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
 
-	repo := repository.NewCategoryRepo(db)
-	svc := service.NewCategoryService(repo)
+	// repo := repository.NewCategoryRepo(db)
+	// svc := service.NewCategoryService(repo)
 
 	// todo parse menu (test)
 	scr := scraper.NewScraper(
@@ -33,15 +30,15 @@ func main() {
 		cfg.ChromedpUserAgent,
 	)
 
-	url, err := scr.GetMenuURL()
-	if err != nil {
-		log.Fatal("Failed to parse menu: %w\n", err)
-	}
+	// url, err := scr.GetMenuURL()
+	// if err != nil {
+	// 	log.Fatal("Failed to parse menu: %w\n", err)
+	// }
 
-	if err := svc.SyncCategories(context.Background(), url); err != nil {
-		log.Fatal("Failed to parse and write to db: %w", err)
-	}
+	// if err := svc.SyncCategories(context.Background(), url); err != nil {
+	// 	log.Fatal("Failed to parse and write to db: %w", err)
+	// }
 
-	log.Print("All categories are parsed and written to db")
+	log.Fatal(scr.GetProducts("https://www.wildberries.ru/catalog/muzhchinam/odezhda/dzhinsy"))
 
 }

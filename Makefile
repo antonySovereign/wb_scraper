@@ -41,3 +41,9 @@ run:
 
 build:
 	@go build -o scraper cmd/scraper/main.go
+
+clean:
+	@docker compose down --remove-orphans
+	@docker container prune -f
+
+db_reset: clean db_up

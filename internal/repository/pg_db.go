@@ -3,11 +3,11 @@ package repository
 import (
 	"fmt"
 
+	"wb_scraper/internal/config"
+
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
-
-	"wb_scraper/internal/config"
 )
 
 func InitDB(cfg *config.Config) (*gorm.DB, error) {
