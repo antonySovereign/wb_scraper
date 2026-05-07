@@ -1,11 +1,10 @@
 package scraper
 
 import (
-	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log"
-	"os"
 
 	"strings"
 	"time"
@@ -84,7 +83,7 @@ func (s *Scraper) GetMenuURL() (string, error) {
 	}
 }
 
-func (s *Scraper) GetProducts(url string) error {
+func (s *Scraper) GetProducts(url string) (string, error) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoFirstRun,
 		chromedp.NoDefaultBrowserCheck,
@@ -101,13 +100,22 @@ func (s *Scraper) GetProducts(url string) error {
 
 	dataChan := make(chan string, 10)
 
+	pendingRequests := make(map[network.RequestID]bool)
+
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
-		if responseEv, ok := ev.(*network.EventResponseReceived); ok {
-			if strings.Contains(responseEv.Response.URL, "https://www.wildberries.ru/__internal/u-search/") {
-				// Выполняем получение тела в отдельном контексте, чтобы не вешать основной цикл
+
+		switch e := ev.(type) {
+		case *network.EventResponseReceived:
+			if strings.Contains(e.Response.URL, "__internal/u-search/") {
+				pendingRequests[e.RequestID] = true
+			}
+
+		case *network.EventLoadingFinished:
+			if pendingRequests[e.RequestID] {
+				delete(pendingRequests, e.RequestID)
+
 				go func(id network.RequestID) {
 					var body []byte
-					// Важно: используем chromedp.Run с базовым контекстом
 					err := chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 						var err error
 						body, err = network.GetResponseBody(id).Do(ctx)
@@ -116,43 +124,19 @@ func (s *Scraper) GetProducts(url string) error {
 
 					if err == nil {
 						dataChan <- string(body)
-
-						path := responseEv.Response.URL + ".json"
-						file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-
-						if err != nil {
-							log.Print(err)
-						} else {
-							defer file.Close()
-							writer := bufio.NewWriter(file)
-							_, err = writer.Write(body)
-							if err == nil {
-								err = writer.Flush()
-								if err == nil {
-									log.Printf("Written to file: %s", path)
-								}
-							}
-
-						}
 					} else {
-						log.Print(err)
+						log.Printf("New error (EventLoadingFinished): %s\n", err)
 					}
-
-				}(responseEv.RequestID)
+				}(e.RequestID)
 			}
 		}
 	})
 
-	return chromedp.Run(ctx,
+	err := chromedp.Run(ctx,
 		network.Enable(),
-		// Эмулируем поведение человека: сначала на главную (чтобы получить куки)
-		chromedp.Navigate("https://www.wildberries.ru/"),
-		chromedp.Sleep(7*time.Second),
 
-		// Переходим на страницу категории
 		chromedp.Navigate(url),
 
-		// Ожидаем появления контента, чтобы триггернуть запрос к API
 		chromedp.WaitVisible(`.catalog-page`, chromedp.ByQuery),
 
 		chromedp.ActionFunc(func(ctx context.Context) error {
@@ -160,13 +144,17 @@ func (s *Scraper) GetProducts(url string) error {
 				select {
 				case jsonBody := <-dataChan:
 					if strings.Contains(jsonBody, `"products"`) {
-						fmt.Printf("Успех! Данные получены. Размер: %d символов\n", len(jsonBody))
 						return nil
 					}
 				case <-ctx.Done():
-					return fmt.Errorf("превышено время ожидания ответа от API")
+					return errors.New("API timeout...")
 				}
 			}
 		}),
 	)
+
+	if err == nil {
+		return <-dataChan, nil
+	}
+	return "", err
 }

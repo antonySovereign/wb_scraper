@@ -7,6 +7,7 @@ import (
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 	"gorm.io/gorm/schema"
 )
 
@@ -17,6 +18,7 @@ func InitDB(cfg *config.Config) (*gorm.DB, error) {
 		NamingStrategy: schema.NamingStrategy{
 			TablePrefix: cfg.DBSchema + ".",
 		},
+		Logger: logger.Default.LogMode(logger.Info),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("Failed to connect to db: %w", err)
