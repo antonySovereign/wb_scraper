@@ -10,6 +10,7 @@ import (
 
 type CategoryRepo interface {
 	SaveBatch(ctx context.Context, categories []domain.Category) error
+	GetAll(ctx context.Context) ([]domain.Category, error)
 }
 
 type CategoryService struct {

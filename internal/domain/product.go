@@ -5,6 +5,7 @@ type Product struct {
 	ID           int     `json:"id" gorm:"column:wb_id;uniqueIndex;not null"`
 	Brand        string  `json:"brand" gorm:"column:brand;not null"`
 	Name         string  `json:"name" gorm:"column:name;not null"`
+	CategoryId   *int    `json:"-" gorm:"column:category_id"`
 	SupplierId   int     `json:"supplierId" gorm:"column:supplierId;not null"`
 	ReviewRating float64 `json:"reviewRating" gorm:"column:reviewRating;not null"`
 	FeedBacks    int     `json:"feedbacks" gorm:"column:feedbacks;not null"`

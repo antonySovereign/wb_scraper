@@ -20,7 +20,7 @@ func NewProductService(repo ProductsRepo) *ProductsService {
 	}
 }
 
-func (s *ProductsService) SyncProducts(ctx context.Context, data string) error {
+func (s *ProductsService) SyncProducts(ctx context.Context, data string, categoryId int) error {
 	var wrapper struct {
 		Products []domain.Product `json:"products"`
 	}
@@ -30,6 +30,9 @@ func (s *ProductsService) SyncProducts(ctx context.Context, data string) error {
 	}
 
 	for i := range wrapper.Products {
+
+		wrapper.Products[i].CategoryId = &categoryId
+
 		for j := range wrapper.Products[i].Sizes {
 			size := &wrapper.Products[i].Sizes[j]
 

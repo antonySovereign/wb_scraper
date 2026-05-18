@@ -2,11 +2,10 @@ package scraper
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log"
 
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chromedp/cdproto/network"
@@ -95,25 +94,37 @@ func (s *Scraper) GetProducts(url string) (string, error) {
 	alloCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancel()
 
-	ctx, cancel := chromedp.NewContext(alloCtx)
+	ctx, cancel := context.WithTimeout(alloCtx, 60*time.Second)
 	defer cancel()
 
-	dataChan := make(chan string, 10)
+	ctx, cancel = chromedp.NewContext(ctx)
+	defer cancel()
 
+	dataChan := make(chan string, 20)
+	var mu sync.Mutex
 	pendingRequests := make(map[network.RequestID]bool)
+	var result string
 
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 
 		switch e := ev.(type) {
 		case *network.EventResponseReceived:
 			if strings.Contains(e.Response.URL, "__internal/u-search/") {
+				mu.Lock()
 				pendingRequests[e.RequestID] = true
+				mu.Unlock()
 			}
 
 		case *network.EventLoadingFinished:
-			if pendingRequests[e.RequestID] {
-				delete(pendingRequests, e.RequestID)
 
+			mu.Lock()
+			isPending := pendingRequests[e.RequestID]
+			if isPending {
+				delete(pendingRequests, e.RequestID)
+			}
+			mu.Unlock()
+
+			if isPending {
 				go func(id network.RequestID) {
 					var body []byte
 					err := chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
@@ -123,9 +134,11 @@ func (s *Scraper) GetProducts(url string) (string, error) {
 					}))
 
 					if err == nil {
-						dataChan <- string(body)
-					} else {
-						log.Printf("New error (EventLoadingFinished): %s\n", err)
+
+						select {
+						case dataChan <- string(body):
+						case <-time.After(time.Second):
+						}
 					}
 				}(e.RequestID)
 			}
@@ -135,6 +148,10 @@ func (s *Scraper) GetProducts(url string) (string, error) {
 	err := chromedp.Run(ctx,
 		network.Enable(),
 
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			_, _, err := runtime.Evaluate(`Object.defineProperty(navigator, 'webdriver', {get: () => undefined})`).Do(ctx)
+			return err
+		}),
 		chromedp.Navigate(url),
 
 		chromedp.WaitVisible(`.catalog-page`, chromedp.ByQuery),
@@ -144,17 +161,20 @@ func (s *Scraper) GetProducts(url string) (string, error) {
 				select {
 				case jsonBody := <-dataChan:
 					if strings.Contains(jsonBody, `"products"`) {
+						result = jsonBody
 						return nil
 					}
 				case <-ctx.Done():
-					return errors.New("API timeout...")
+
+					return ctx.Err()
 				}
 			}
 		}),
 	)
 
-	if err == nil {
-		return <-dataChan, nil
+	if err != nil {
+		return "", err
 	}
-	return "", err
+
+	return result, nil
 }
