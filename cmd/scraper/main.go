@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"log"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 
 	"wb_scraper/internal/config"
 	"wb_scraper/internal/repository"
@@ -13,23 +16,58 @@ import (
 
 const (
 	baseURL = "https://wildberries.ru"
-	workers = 10
+	workers = 2
 )
 
 func main() {
 	cfg := config.Load()
 	ctx := context.Background()
 
+	// connect to postgres
 	db, err := repository.InitDB(cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatal("Failed to get db connection: %w\n", err)
+	}
+
+	// connect to redis
+	redisClient, err := repository.InitRedis(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Print("Successfully connected to redis...")
+
+	// connect to kafka
+	if err := repository.CheckKafkaConnection([]string{cfg.KafkaBrokers}); err != nil {
+		log.Fatal(err)
+	}
+
+	kafkaWriter := repository.InitKafkaWriter([]string{cfg.KafkaBrokers}, cfg.KafkaTopic)
+	log.Print("Successfully connected to kafka...")
+	defer kafkaWriter.Close()
 
 	categoryRepo := repository.NewCategoryRepo(db)
 	categoryService := service.NewCategoryService(categoryRepo)
 
 	productsRepo := repository.NewProductsRepository(db)
 	productsService := service.NewProductService(productsRepo)
+
+	// root context for all operations, can be used to cancel all operations if needed
+	rootCtx, cancelAll := context.WithCancel(ctx)
+	defer cancelAll()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-sigChan
+		log.Println("Received shutdown signal, exiting...")
+		cancelAll()
+	}()
 
 	scr := scraper.NewScraper(
 		cfg.ChromedpHeadless,
@@ -59,6 +97,7 @@ func main() {
 		CategoryID int
 		URL        string
 	}
+
 	jobs := make(chan Job, len(categories))
 
 	var wg sync.WaitGroup
@@ -73,47 +112,61 @@ func main() {
 				cfg.ChromedpUserAgent,
 			)
 
-			for job := range jobs {
-				log.Printf("Worker %d: parsing %s", workerID, job.URL)
+			for {
+				select {
+				case <-rootCtx.Done():
+					log.Printf("Worker %d: shutting down\n", workerID)
+					return
+				case job, ok := <-jobs:
+					if !ok {
+						log.Printf("Worker %d: no more jobs, exiting\n", workerID)
+						return
+					}
 
-				productsJson, err := localScr.GetProducts(job.URL)
-				if err != nil {
-					log.Printf("Worker got error %d: %v", workerID, err)
-					continue
+					log.Printf("Worker %d: parsing %s", workerID, job.URL)
+
+					productsJson, err := localScr.GetProducts(job.URL)
+					if err != nil {
+						log.Printf("Worker got error %d: %v", workerID, err)
+						continue
+					}
+
+					if err := productsService.SyncProducts(ctx, productsJson, job.CategoryID); err != nil {
+						log.Printf("Worker got error %d: %v", workerID, err)
+						continue
+					}
 				}
-
-				productsService.SyncProducts(ctx, productsJson, job.CategoryID)
 			}
 		}(i)
 	}
 
 	for _, category := range categories {
-		jobs <- Job{CategoryID: category.DbID, URL: baseURL + category.Url}
+		select {
+		case <-rootCtx.Done():
+			log.Println("Main: shutting down, no more jobs will be added")
+			break
+		case jobs <- Job{CategoryID: category.DbID, URL: baseURL + category.Url}:
+		}
 	}
 
 	close(jobs)
 
 	wg.Wait()
-	log.Print("[+] WB Parser finished!!!")
+	log.Print("All workers finished!!!")
 
-	// for index, category := range categories {
-	// 	log.Printf("[%d] Working on category: %s\n", index, category.Name)
+	log.Print("Closing db connection...")
+	if err := sqlDB.Close(); err != nil {
+		log.Printf("Failed to close db connection: %v", err)
+	} else {
+		log.Print("Db connection closed successfully")
+	}
 
-	// 	fullURL := baseURL + category.Url
+	log.Print("Closing redis connection")
+	if err := redisClient.Close(); err != nil {
+		log.Printf("Failed to close redis connection: %v", err)
+	} else {
+		log.Print("Redis connection closed successfully")
+	}
 
-	// 	productsJSON, err := scr.GetProducts(fullURL)
-	// 	if err != nil {
-	// 		log.Printf("! Failed to parse %s: %v", category.Name, err)
-	// 		continue
-	// 	}
-
-	// 	if err := productsService.SyncProducts(ctx, productsJSON, category.DbID); err != nil {
-	// 		log.Printf("! Failed to sync %s: %v", category.Name, err)
-	// 		continue
-	// 	}
-
-	// 	log.Printf("[*] Successfuly updated: %s", category.Name)
-	// 	time.Sleep(2 * time.Second)
-
-	// }
+	log.Print("Scraper finished")
 }

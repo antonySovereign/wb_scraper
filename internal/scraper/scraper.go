@@ -3,6 +3,7 @@ package scraper
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"strings"
 	"sync"
@@ -110,6 +111,7 @@ func (s *Scraper) GetProducts(url string) (string, error) {
 		switch e := ev.(type) {
 		case *network.EventResponseReceived:
 			if strings.Contains(e.Response.URL, "__internal/u-search/") {
+				log.Printf("Requesting: %s\n", e.Response.URL)
 				mu.Lock()
 				pendingRequests[e.RequestID] = true
 				mu.Unlock()

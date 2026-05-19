@@ -19,6 +19,9 @@ type Config struct {
 	ChromedpHeadless             bool
 	ChromedpDisableBlinkFeatures string
 	ChromedpUserAgent            string
+	RedisAddr                    string
+	KafkaBrokers                 string
+	KafkaTopic                   string
 }
 
 func Load() *Config {
@@ -37,6 +40,9 @@ func Load() *Config {
 		ChromedpHeadless:             getBoolEnv("CHROMEDP_HEADLESS", true),
 		ChromedpDisableBlinkFeatures: getEnv("CHROMEDP_DISABLE_BLINK_FEATURES", "AutomationControlled"),
 		ChromedpUserAgent:            getEnv("CHROMEDP_USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+		RedisAddr:                    getEnv("REDIS_ADDR", "localhost:6379"),
+		KafkaBrokers:                 getEnv("KAFKA_BROKERS", "localhost:9092"),
+		KafkaTopic:                   getEnv("KAFKA_TOPIC", "wb-raw-products"),
 	}
 }
 
